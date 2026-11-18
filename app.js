@@ -1,33 +1,15 @@
 'use strict';
 
-/**
- * Derive target row and column sums from gridNumbers and answerMap.
- * Guarantees mathematical consistency between targetRows and targetCols.
- *
- * @param {number[][]} gridNumbers
- * @param {number[][]} answerMap
- * @returns {{ targetRows: number[], targetCols: number[] }}
- */
-function deriveTargets(gridNumbers, answerMap) {
-  const rowCount = gridNumbers.length;
-  const colCount = rowCount > 0 ? gridNumbers[0].length : 0;
+const appData =
+  typeof require === 'function' && typeof module !== 'undefined' && module.exports
+    ? require('./stages.js')
+    : typeof window !== 'undefined'
+    ? window.NUMSUM_DATA
+    : { DIFFICULTIES: [], STAGES_BY_DIFFICULTY: {}, deriveTargets: () => ({ targetRows: [], targetCols: [] }) };
 
-  const targetRows = Array.from({ length: rowCount }, (_, r) =>
-    gridNumbers[r].reduce(
-      (sum, value, c) => sum + (answerMap[r][c] === 1 ? value : 0),
-      0
-    )
-  );
+const STAGES = Object.values(appData.STAGES_BY_DIFFICULTY).flat();
 
-  const targetCols = Array.from({ length: colCount }, (_, c) =>
-    gridNumbers.reduce(
-      (sum, row, r) => sum + (answerMap[r][c] === 1 ? row[c] : 0),
-      0
-    )
-  );
-
-  return { targetRows, targetCols };
-}
+const STORAGE_KEY = 'numsum_picross_progress_v1';
 
 /**
  * Calculate the current selected sums for each row and column.
@@ -73,84 +55,92 @@ function checkIsCleared(currentRowsSum, currentColsSum, targetRows, targetCols) 
 }
 
 /**
- * Build a validated stage object with derived targets.
+ * Create default progression state (Stage 1 unlocked per difficulty).
  */
-function createStage({ id, name, icon, accentColor, gridNumbers, answerMap }) {
-  const { targetRows, targetCols } = deriveTargets(gridNumbers, answerMap);
-  return {
-    id,
-    name,
-    icon,
-    accentColor,
-    gridNumbers,
-    answerMap,
-    targetRows,
-    targetCols,
-  };
+function createInitialProgress() {
+  const progress = {};
+  for (const diff of appData.DIFFICULTIES) {
+    progress[diff.id] = {
+      unlockedCount: 1,
+      clearedIds: [],
+    };
+  }
+  return progress;
 }
 
-const STAGES = [
-  createStage({
-    id: 'heart',
-    name: 'ハート',
-    icon: '❤️',
-    accentColor: '#FF4D4D',
-    gridNumbers: [
-      [1, 3, 2, 3, 5],
-      [4, 7, 1, 9, 2],
-      [5, 2, 8, 1, 6],
-      [9, 1, 5, 4, 3],
-      [2, 6, 2, 7, 1],
-    ],
-    answerMap: [
-      [0, 1, 0, 1, 0],
-      [1, 1, 1, 1, 1],
-      [0, 1, 1, 1, 0],
-      [0, 0, 1, 0, 0],
-      [0, 0, 0, 0, 0],
-    ],
-  }),
-  createStage({
-    id: 'star',
-    name: 'スター',
-    icon: '⭐',
-    accentColor: '#F59E0B',
-    gridNumbers: [
-      [4, 8, 5, 9, 3],
-      [7, 2, 6, 3, 8],
-      [1, 4, 2, 7, 3],
-      [6, 9, 1, 4, 5],
-      [8, 5, 7, 6, 2],
-    ],
-    answerMap: [
-      [0, 0, 1, 0, 0],
-      [0, 1, 1, 1, 0],
-      [1, 1, 1, 1, 1],
-      [0, 1, 1, 1, 0],
-      [1, 0, 0, 0, 1],
-    ],
-  }),
-  createStage({
-    id: 'smile',
-    name: 'スマイル',
-    icon: '😊',
-    accentColor: '#10B981',
-    gridNumbers: [
-      [6, 3, 9, 4, 8],
-      [5, 7, 8, 2, 6],
-      [4, 9, 6, 7, 5],
-      [1, 8, 9, 7, 3],
-      [9, 2, 5, 4, 8],
-    ],
-    answerMap: [
-      [0, 1, 0, 1, 0],
-      [0, 1, 0, 1, 0],
-      [0, 0, 0, 0, 0],
-      [1, 0, 0, 0, 1],
-      [0, 1, 1, 1, 0],
-    ],
-  }),
-];
+/**
+ * Normalize loaded progression object safely against current DIFFICULTIES.
+ */
+function normalizeProgress(raw) {
+  const base = createInitialProgress();
+  if (!raw || typeof raw !== 'object') return base;
+
+  for (const diff of appData.DIFFICULTIES) {
+    const entry = raw[diff.id];
+    const maxCount = (appData.STAGES_BY_DIFFICULTY[diff.id] || []).length;
+    if (entry && typeof entry === 'object') {
+      const unlocked = Number.isInteger(entry.unlockedCount) ? entry.unlockedCount : 1;
+      const cleared = Array.isArray(entry.clearedIds)
+        ? entry.clearedIds.filter((id) => typeof id === 'string')
+        : [];
+      base[diff.id] = {
+        unlockedCount: Math.max(1, Math.min(maxCount || 1, unlocked)),
+        clearedIds: Array.from(new Set(cleared)),
+      };
+    }
+  }
+  return base;
+}
+
+/**
+ * Pure transition: record a cleared stage and unlock the next stage if applicable.
+ */
+function applyStageClear(progress, difficultyId, stageIndex, stageId, totalStages) {
+  const nextProgress = {};
+  for (const key of Object.keys(progress)) {
+    nextProgress[key] = {
+      unlockedCount: progress[key].unlockedCount,
+      clearedIds: [...progress[key].clearedIds],
+    };
+  }
+
+  const current = nextProgress[difficultyId] || { unlockedCount: 1, clearedIds: [] };
+  const newlyCleared = !current.clearedIds.includes(stageId);
+  if (newlyCleared) {
+    current.clearedIds.push(stageId);
+  }
+
+  const nextUnlockTarget = Math.min(totalStages, stageIndex + 2);
+  const newlyUnlocked = nextUnlockTarget > current.unlockedCount;
+  if (newlyUnlocked) {
+    current.unlockedCount = nextUnlockTarget;
+  }
+
+  nextProgress[difficultyId] = current;
+  return { nextProgress, newlyCleared, newlyUnlocked };
+}
+
+/**
+ * Pure helper: find one cell to fix or reveal for the Hint button.
+ * Prioritizes fixing an erroneously selected cell, then revealing an unselected answer cell.
+ */
+function findHintCell(answerMap, selectedGrid) {
+  for (let r = 0; r < answerMap.length; r++) {
+    for (let c = 0; c < answerMap[r].length; c++) {
+      if (selectedGrid[r][c] && answerMap[r][c] === 0) {
+        return { r, c, action: 'unselect' };
+      }
+    }
+  }
+  for (let r = 0; r < answerMap.length; r++) {
+    for (let c = 0; c < answerMap[r].length; c++) {
+      if (!selectedGrid[r][c] && answerMap[r][c] === 1) {
+        return { r, c, action: 'select' };
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Lightweight Web Audio synthesizer for zero-asset tactile sound effects.
@@ -215,6 +205,10 @@ class SoundEffects {
     this.playTone(250, 210, 0.035, 'triangle', 0.05);
   }
 
+  hint() {
+    this.playTone(587.33, 880, 0.09, 'sine', 0.07);
+  }
+
   lineMatch() {
     this.playTone(783.99, 783.99, 0.07, 'sine', 0.06, 0.02);
     this.playTone(1046.5, 1046.5, 0.11, 'sine', 0.07, 0.08);
@@ -232,41 +226,231 @@ function createEmptyGrid(rows, cols, value = false) {
   return Array.from({ length: rows }, () => Array(cols).fill(value));
 }
 
+function loadProgressFromStorage() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return createInitialProgress();
+    return normalizeProgress(JSON.parse(raw));
+  } catch {
+    return createInitialProgress();
+  }
+}
+
+function saveProgressToStorage(progress) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  } catch {
+    // Ignore storage quota or restricted environments.
+  }
+}
+
 function initGame() {
-  const stageTabsEl = document.getElementById('stage-tabs');
+  const homeScreenEl = document.getElementById('home-screen');
+  const stagesScreenEl = document.getElementById('stages-screen');
+  const gameScreenEl = document.getElementById('game-screen');
+
+  const difficultyListEl = document.getElementById('difficulty-list');
+  const stagesTitleEl = document.getElementById('stages-title');
+  const stagesProgressTextEl = document.getElementById('stages-progress-text');
+  const stagesProgressFillEl = document.getElementById('stages-progress-fill');
+  const playNextBtn = document.getElementById('play-next-btn');
+  const stageGridEl = document.getElementById('stage-grid');
+
+  const gameDifficultyBadgeEl = document.getElementById('game-difficulty-badge');
+  const gameStageTitleEl = document.getElementById('game-stage-title');
   const boardEl = document.getElementById('game-board');
   const clearBannerEl = document.getElementById('clear-banner');
   const clearBannerTextEl = document.getElementById('clear-banner-text');
+  const clearUnlockTextEl = document.getElementById('clear-unlock-text');
+  const nextStageBtn = document.getElementById('next-stage-btn');
+  const clearToListBtn = document.getElementById('clear-to-list-btn');
+
   const modeToggleBtn = document.getElementById('mode-toggle-btn');
+  const hintBtn = document.getElementById('hint-btn');
   const resetBtn = document.getElementById('reset-btn');
   const soundToggleBtn = document.getElementById('sound-toggle-btn');
   const statusHintEl = document.getElementById('status-hint');
 
-  if (!boardEl || !stageTabsEl) return;
+  const backToHomeBtn = document.getElementById('back-to-home-btn');
+  const backToStagesBtn = document.getElementById('back-to-stages-btn');
+
+  const rulesDialog = document.getElementById('rules-dialog');
+  const openRulesBtns = [
+    document.getElementById('open-rules-home-btn'),
+    document.getElementById('open-rules-stages-btn'),
+    document.getElementById('open-rules-game-btn'),
+  ].filter(Boolean);
+  const closeRulesBtn = document.getElementById('close-rules-btn');
+  const confirmRulesBtn = document.getElementById('confirm-rules-btn');
+  const resetProgressBtn = document.getElementById('reset-progress-btn');
+
+  if (!homeScreenEl || !boardEl) return;
 
   const sfx = new SoundEffects();
 
   const state = {
+    view: 'home', // 'home' | 'stages' | 'game'
+    difficultyId: appData.DIFFICULTIES[0]?.id || 'easy',
     stageIndex: 0,
     mode: 'fill', // 'fill' | 'mark'
     selectedGrid: [],
     xMarkGrid: [],
     isCleared: false,
+    newlyUnlockedIndex: null,
     prevMatchedRows: [],
     prevMatchedCols: [],
-    dragSession: null, // { type: 'fill' | 'mark', targetValue: boolean, visited: Set<string> }
+    dragSession: null,
     ignoreClickUntil: 0,
+    progress: loadProgressFromStorage(),
   };
 
   let rowHeaderEls = [];
   let colHeaderEls = [];
   let cellEls = [];
 
+  function getDifficultyMeta(diffId = state.difficultyId) {
+    return appData.DIFFICULTIES.find((d) => d.id === diffId) || appData.DIFFICULTIES[0];
+  }
+
+  function getStagesForDifficulty(diffId = state.difficultyId) {
+    return appData.STAGES_BY_DIFFICULTY[diffId] || [];
+  }
+
   function getStage() {
-    return STAGES[state.stageIndex];
+    return getStagesForDifficulty()[state.stageIndex];
+  }
+
+  function switchView(nextView) {
+    state.view = nextView;
+    state.dragSession = null;
+    homeScreenEl.hidden = nextView !== 'home';
+    stagesScreenEl.hidden = nextView !== 'stages';
+    gameScreenEl.hidden = nextView !== 'game';
+
+    if (nextView === 'home') {
+      renderHomeScreen();
+    } else if (nextView === 'stages') {
+      renderStageSelectScreen();
+    }
+  }
+
+  function renderHomeScreen() {
+    difficultyListEl.textContent = '';
+
+    for (const diff of appData.DIFFICULTIES) {
+      const stages = getStagesForDifficulty(diff.id);
+      const prog = state.progress[diff.id] || { unlockedCount: 1, clearedIds: [] };
+      const clearedCount = prog.clearedIds.length;
+
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'difficulty-card';
+      card.style.setProperty('--card-color', diff.themeColor);
+
+      const title = document.createElement('span');
+      title.className = 'difficulty-card-title';
+      title.textContent = `${diff.label} (${diff.size} × ${diff.size})`;
+
+      const sub = document.createElement('span');
+      sub.className = 'difficulty-card-sub';
+      sub.textContent = diff.subtitle;
+
+      const progBadge = document.createElement('span');
+      progBadge.className = 'difficulty-card-progress';
+      progBadge.textContent =
+        clearedCount >= stages.length
+          ? `🏆 コンプリート！ (${clearedCount}/${stages.length}問)`
+          : `解放: ${prog.unlockedCount}/${stages.length}問 ・ クリア: ${clearedCount}/${stages.length}問`;
+
+      card.append(title, sub, progBadge);
+      card.addEventListener('click', () => {
+        state.difficultyId = diff.id;
+        switchView('stages');
+      });
+
+      difficultyListEl.appendChild(card);
+    }
+  }
+
+  function getNextPlayableIndex(diffId) {
+    const stages = getStagesForDifficulty(diffId);
+    const prog = state.progress[diffId] || { unlockedCount: 1, clearedIds: [] };
+    for (let i = 0; i < prog.unlockedCount && i < stages.length; i++) {
+      if (!prog.clearedIds.includes(stages[i].id)) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  function renderStageSelectScreen() {
+    const diff = getDifficultyMeta();
+    const stages = getStagesForDifficulty();
+    const prog = state.progress[diff.id] || { unlockedCount: 1, clearedIds: [] };
+    const clearedSet = new Set(prog.clearedIds);
+    const clearedCount = clearedSet.size;
+    const pct = stages.length > 0 ? Math.round((clearedCount / stages.length) * 100) : 0;
+
+    document.documentElement.style.setProperty('--diff-accent', diff.themeColor);
+    stagesTitleEl.textContent = `${diff.label} (${diff.size} × ${diff.size})`;
+    stagesProgressTextEl.textContent = `クリア: ${clearedCount} / ${stages.length}問 （解放済み: ${prog.unlockedCount}問）`;
+    stagesProgressFillEl.style.inlineSize = `${pct}%`;
+
+    const nextIdx = getNextPlayableIndex(diff.id);
+    playNextBtn.textContent =
+      clearedCount >= stages.length
+        ? '▶ 最初からもう一度遊ぶ (Q.1)'
+        : `▶ つづきから遊ぶ (Q.${nextIdx + 1})`;
+
+    stageGridEl.textContent = '';
+
+    stages.forEach((stage, idx) => {
+      const isUnlocked = idx < prog.unlockedCount;
+      const isCleared = clearedSet.has(stage.id);
+      const isCurrent = isUnlocked && !isCleared && idx === nextIdx;
+
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'stage-card';
+      card.setAttribute('role', 'listitem');
+
+      if (isCleared) card.classList.add('is-cleared');
+      else if (isCurrent) card.classList.add('is-current');
+      else if (!isUnlocked) card.classList.add('is-locked');
+
+      card.disabled = !isUnlocked;
+
+      const numEl = document.createElement('span');
+      numEl.className = 'stage-card-num';
+      numEl.textContent = `Q.${stage.number}`;
+
+      const iconEl = document.createElement('span');
+      iconEl.className = 'stage-card-icon';
+      iconEl.textContent = !isUnlocked ? '🔒' : isCleared ? stage.icon : '❓';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'stage-card-name';
+      nameEl.textContent = !isUnlocked ? '未解放' : isCleared ? stage.name : '???';
+
+      const badgeEl = document.createElement('span');
+      badgeEl.className = 'stage-card-badge';
+      badgeEl.textContent = isCleared ? 'CLEAR' : isUnlocked ? 'PLAY' : 'LOCK';
+
+      card.append(numEl, iconEl, nameEl, badgeEl);
+      if (isUnlocked) {
+        card.addEventListener('click', () => {
+          loadStage(idx);
+          switchView('game');
+        });
+      }
+
+      stageGridEl.appendChild(card);
+    });
   }
 
   function loadStage(index) {
+    const diff = getDifficultyMeta();
+    const stages = getStagesForDifficulty();
     state.stageIndex = index;
     const stage = getStage();
     const rows = stage.gridNumbers.length;
@@ -275,32 +459,30 @@ function initGame() {
     state.selectedGrid = createEmptyGrid(rows, cols, false);
     state.xMarkGrid = createEmptyGrid(rows, cols, false);
     state.isCleared = false;
+    state.newlyUnlockedIndex = null;
     state.prevMatchedRows = stage.targetRows.map((t) => t === 0);
     state.prevMatchedCols = stage.targetCols.map((t) => t === 0);
     state.dragSession = null;
 
+    document.documentElement.style.setProperty('--diff-accent', diff.themeColor);
     document.documentElement.style.setProperty('--stage-accent', stage.accentColor);
-    renderStageTabs();
+
+    gameDifficultyBadgeEl.textContent = `${diff.label} ${diff.size}×${diff.size}`;
+    updateGameStageHeading();
+
     buildBoardDOM();
     updateBoardUI({ suppressSounds: true });
   }
 
-  function renderStageTabs() {
-    stageTabsEl.textContent = '';
-    STAGES.forEach((stage, idx) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'stage-tab';
-      if (idx === state.stageIndex) {
-        btn.classList.add('is-active');
-        btn.setAttribute('aria-pressed', 'true');
-      } else {
-        btn.setAttribute('aria-pressed', 'false');
-      }
-      btn.textContent = `${stage.icon} ${stage.name}`;
-      btn.addEventListener('click', () => loadStage(idx));
-      stageTabsEl.appendChild(btn);
-    });
+  function updateGameStageHeading() {
+    const stage = getStage();
+    const prog = state.progress[state.difficultyId];
+    const alreadyCleared = prog?.clearedIds.includes(stage.id);
+    if (state.isCleared || alreadyCleared) {
+      gameStageTitleEl.textContent = `Q.${stage.number} ${stage.icon} ${stage.name}`;
+    } else {
+      gameStageTitleEl.textContent = `Q.${stage.number} ???`;
+    }
   }
 
   function buildBoardDOM() {
@@ -314,14 +496,12 @@ function initGame() {
     colHeaderEls = [];
     cellEls = Array.from({ length: rows }, () => Array(cols));
 
-    // Top-left corner cell
     const corner = document.createElement('div');
     corner.className = 'board-corner';
     corner.setAttribute('aria-hidden', 'true');
-    corner.textContent = stage.icon;
+    corner.textContent = '∑';
     boardEl.appendChild(corner);
 
-    // Column headers
     for (let c = 0; c < cols; c++) {
       const header = document.createElement('div');
       header.className = 'header-cell col-header';
@@ -330,7 +510,6 @@ function initGame() {
       colHeaderEls.push(header);
     }
 
-    // Rows: row header + grid cells
     for (let r = 0; r < rows; r++) {
       const rowHeader = document.createElement('div');
       rowHeader.className = 'header-cell row-header';
@@ -343,6 +522,8 @@ function initGame() {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'grid-cell';
+        if (cols === 10 && c === 4) btn.classList.add('is-guide-right');
+        if (rows === 10 && r === 4) btn.classList.add('is-guide-bottom');
         btn.dataset.row = String(r);
         btn.dataset.col = String(c);
         btn.setAttribute('aria-label', `${r + 1}行 ${c + 1}列 数字 ${num}`);
@@ -369,8 +550,6 @@ function initGame() {
       state.selectedGrid[r][c] = next;
       if (next) {
         state.xMarkGrid[r][c] = false;
-      }
-      if (next) {
         sfx.select();
       } else {
         sfx.deselect();
@@ -395,11 +574,9 @@ function initGame() {
   }
 
   function handleCellPointerDown(e, r, c) {
-    if (state.isCleared) return;
-    // Only handle primary button or touch/pen on pointerdown.
+    if (state.isCleared || state.view !== 'game') return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
 
-    // Release implicit touch capture so elementFromPoint tracks dragging across cells.
     if (typeof e.currentTarget.releasePointerCapture === 'function') {
       try {
         if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
@@ -423,7 +600,7 @@ function initGame() {
   }
 
   function handlePointerMove(e) {
-    if (!state.dragSession || state.isCleared) return;
+    if (!state.dragSession || state.isCleared || state.view !== 'game') return;
     const target = document.elementFromPoint(e.clientX, e.clientY);
     const cellBtn = target?.closest?.('.grid-cell');
     if (!cellBtn) return;
@@ -445,7 +622,6 @@ function initGame() {
   }
 
   function handleCellClick(e, r, c) {
-    // Pointer interactions already took effect immediately on pointerdown.
     if (e.detail > 0 || performance.now() < state.ignoreClickUntil) {
       return;
     }
@@ -506,10 +682,8 @@ function initGame() {
   }
 
   function updateHeaderElement(el, current, target) {
-    const isMatched = current === target;
-    const isExceeded = current > target;
-    el.classList.toggle('is-matched', isMatched);
-    el.classList.toggle('is-exceeded', isExceeded);
+    el.classList.toggle('is-matched', current === target);
+    el.classList.toggle('is-exceeded', current > target);
     const currentSpan = el.querySelector('.current-val');
     if (currentSpan) {
       currentSpan.textContent = `(${current})`;
@@ -518,6 +692,7 @@ function initGame() {
 
   function updateBoardUI({ suppressSounds = false } = {}) {
     const stage = getStage();
+    const stages = getStagesForDifficulty();
     const { currentRowsSum, currentColsSum } = calculateCurrentSums(
       stage.gridNumbers,
       state.selectedGrid
@@ -533,7 +708,22 @@ function initGame() {
     const newlyCleared = cleared && !state.isCleared;
     state.isCleared = cleared;
 
-    // Update headers and detect newly matched lines
+    if (newlyCleared) {
+      const transition = applyStageClear(
+        state.progress,
+        state.difficultyId,
+        state.stageIndex,
+        stage.id,
+        stages.length
+      );
+      state.progress = transition.nextProgress;
+      saveProgressToStorage(state.progress);
+      if (transition.newlyUnlocked) {
+        state.newlyUnlockedIndex = state.stageIndex + 1;
+      }
+      updateGameStageHeading();
+    }
+
     let anyNewLineMatch = false;
     stage.targetRows.forEach((target, r) => {
       const matched = currentRowsSum[r] === target;
@@ -553,7 +743,6 @@ function initGame() {
       updateHeaderElement(colHeaderEls[c], currentColsSum[c], target);
     });
 
-    // Update cells
     for (let r = 0; r < stage.gridNumbers.length; r++) {
       for (let c = 0; c < stage.gridNumbers[r].length; c++) {
         const btn = cellEls[r][c];
@@ -567,19 +756,39 @@ function initGame() {
       }
     }
 
-    boardEl.classList.toggle('is-cleared', cleared);
+    const cornerEl = boardEl.querySelector('.board-corner');
+    if (cornerEl) {
+      cornerEl.textContent = cleared ? stage.icon : '∑';
+    }
 
-    if (clearBannerEl && clearBannerTextEl) {
-      clearBannerEl.hidden = !cleared;
-      if (cleared) {
-        clearBannerTextEl.textContent = `${stage.icon} STAGE CLEARED! 「${stage.name}」が完成しました！ ${stage.icon}`;
+    clearBannerEl.hidden = !cleared;
+    if (cleared) {
+      clearBannerTextEl.textContent = `${stage.icon} STAGE CLEARED! 「${stage.name}」が完成しました！`;
+      if (state.newlyUnlockedIndex !== null) {
+        clearUnlockTextEl.hidden = false;
+        clearUnlockTextEl.textContent = `🔓 新しい問題「Q.${state.newlyUnlockedIndex + 1}」が解放されました！`;
+      } else {
+        clearUnlockTextEl.hidden = true;
       }
+
+      const hasNext = state.stageIndex + 1 < stages.length;
+      nextStageBtn.hidden = !hasNext;
+      if (hasNext) {
+        nextStageBtn.textContent = `次の問題へ (Q.${state.stageIndex + 2}) →`;
+      }
+      clearToListBtn.textContent = hasNext
+        ? 'ステージ一覧へ'
+        : '🎉 全問コンプリート！一覧へ';
+    }
+
+    if (hintBtn) {
+      hintBtn.disabled = cleared;
     }
 
     if (statusHintEl) {
       statusHintEl.textContent = cleared
-        ? 'クリアおめでとうございます！次のステージも遊べます。'
-        : '左クリック/タップで選択、ドラッグで連続塗りつぶし、右クリックまたは✖️モードでメモ';
+        ? 'クリアおめでとうございます！「次の問題へ」で進めます。'
+        : '左クリック/タップで塗りつぶし（ドラッグ可）・右クリック/✖️モードでメモ';
     }
 
     if (!suppressSounds) {
@@ -602,16 +811,75 @@ function initGame() {
   function updateSoundButton() {
     if (!soundToggleBtn) return;
     soundToggleBtn.setAttribute('aria-pressed', String(!sfx.muted));
-    soundToggleBtn.textContent = sfx.muted ? '🔇 音声OFF' : '🔊 音声ON';
+    soundToggleBtn.textContent = sfx.muted ? '🔇' : '🔊';
+  }
+
+  function openRulesModal() {
+    if (!rulesDialog) return;
+    if (typeof rulesDialog.showModal === 'function') {
+      rulesDialog.showModal();
+    } else {
+      rulesDialog.setAttribute('open', '');
+    }
+  }
+
+  function closeRulesModal() {
+    if (!rulesDialog) return;
+    if (typeof rulesDialog.close === 'function') {
+      rulesDialog.close();
+    } else {
+      rulesDialog.removeAttribute('open');
+    }
   }
 
   window.addEventListener('pointermove', handlePointerMove, { passive: true });
   window.addEventListener('pointerup', endDragSession);
   window.addEventListener('pointercancel', endDragSession);
 
+  backToHomeBtn?.addEventListener('click', () => switchView('home'));
+  backToStagesBtn?.addEventListener('click', () => switchView('stages'));
+  clearToListBtn?.addEventListener('click', () => switchView('stages'));
+
+  playNextBtn?.addEventListener('click', () => {
+    const idx = getNextPlayableIndex(state.difficultyId);
+    loadStage(idx);
+    switchView('game');
+  });
+
+  nextStageBtn?.addEventListener('click', () => {
+    const stages = getStagesForDifficulty();
+    if (state.stageIndex + 1 < stages.length) {
+      loadStage(state.stageIndex + 1);
+    }
+  });
+
   modeToggleBtn?.addEventListener('click', () => {
     state.mode = state.mode === 'fill' ? 'mark' : 'fill';
     updateModeButton();
+  });
+
+  hintBtn?.addEventListener('click', () => {
+    if (state.isCleared) return;
+    const stage = getStage();
+    const hint = findHintCell(stage.answerMap, state.selectedGrid);
+    if (!hint) return;
+
+    const { r, c, action } = hint;
+    if (action === 'select') {
+      state.selectedGrid[r][c] = true;
+      state.xMarkGrid[r][c] = false;
+    } else {
+      state.selectedGrid[r][c] = false;
+    }
+    sfx.hint();
+    updateBoardUI();
+
+    const cell = cellEls[r]?.[c];
+    if (cell) {
+      cell.classList.remove('is-hint-flash');
+      void cell.offsetWidth;
+      cell.classList.add('is-hint-flash');
+    }
   });
 
   resetBtn?.addEventListener('click', () => {
@@ -627,9 +895,29 @@ function initGame() {
     }
   });
 
+  for (const btn of openRulesBtns) {
+    btn.addEventListener('click', openRulesModal);
+  }
+  closeRulesBtn?.addEventListener('click', closeRulesModal);
+  confirmRulesBtn?.addEventListener('click', closeRulesModal);
+  rulesDialog?.addEventListener('click', (e) => {
+    if (e.target === rulesDialog) {
+      closeRulesModal();
+    }
+  });
+
+  resetProgressBtn?.addEventListener('click', () => {
+    const ok = window.confirm('すべてのクリア履歴と解放状況を初期化しますか？');
+    if (!ok) return;
+    state.progress = createInitialProgress();
+    saveProgressToStorage(state.progress);
+    closeRulesModal();
+    switchView('home');
+  });
+
   updateModeButton();
   updateSoundButton();
-  loadStage(0);
+  switchView('home');
 }
 
 if (typeof document !== 'undefined') {
@@ -642,9 +930,14 @@ if (typeof document !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    DIFFICULTIES: appData.DIFFICULTIES,
+    STAGES_BY_DIFFICULTY: appData.STAGES_BY_DIFFICULTY,
     STAGES,
-    deriveTargets,
+    deriveTargets: appData.deriveTargets,
     calculateCurrentSums,
     checkIsCleared,
+    createInitialProgress,
+    applyStageClear,
+    findHintCell,
   };
 }

@@ -3,50 +3,210 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ナンバーサム・ピクロス | NumSum Picross</title>
+    <title>NumSum Picross | ナンバーサム・ピクロス</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="stages.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
     <main class="app-shell">
-      <header class="app-header">
-        <h1 class="app-title">NUMSUM PICROSS</h1>
-        <p class="app-subtitle">縦横の合計値を合わせてドット絵を完成させよう</p>
-      </header>
+      <!-- 1. Home / Difficulty Selection Screen -->
+      <section id="home-screen" class="screen home-screen" aria-label="難易度選択">
+        <header class="home-header">
+          <h1 class="brand-title">NumSum Picross</h1>
+          <p class="brand-subtitle">サイズを選んでスタート（クリアで次の問題が解放）</p>
+        </header>
 
-      <nav id="stage-tabs" class="stage-tabs" aria-label="ステージ選択"></nav>
+        <div id="difficulty-list" class="difficulty-list"></div>
 
-      <div class="toolbar">
-        <button
-          id="mode-toggle-btn"
-          class="control-btn"
-          type="button"
-          aria-pressed="false"
-        >
-          ✏️ 塗りつぶし中 (切替)
-        </button>
-        <button id="reset-btn" class="control-btn" type="button">
-          🔄 リセット
-        </button>
-        <button
-          id="sound-toggle-btn"
-          class="control-btn"
-          type="button"
-          aria-pressed="true"
-        >
-          🔊 音声ON
-        </button>
-      </div>
-
-      <div id="clear-banner" class="clear-banner" role="status" aria-live="polite" hidden>
-        <span id="clear-banner-text"></span>
-      </div>
-
-      <section class="game-card" aria-label="ゲーム盤面">
-        <div id="game-board" class="game-board" role="grid" aria-label="5×5 ナンバーサム・ピクロス盤面"></div>
+        <div class="home-footer">
+          <button id="open-rules-home-btn" class="pill-btn" type="button">
+            <span class="pill-icon" aria-hidden="true">?</span>
+            <span>遊び方・ルールを見る</span>
+          </button>
+        </div>
       </section>
 
-      <p id="status-hint" class="status-hint"></p>
+      <!-- 2. Stage Select Screen -->
+      <section id="stages-screen" class="screen stages-screen" aria-label="ステージ選択" hidden>
+        <header class="top-nav">
+          <button id="back-to-home-btn" class="nav-btn" type="button">← もどる</button>
+          <h2 id="stages-title" class="nav-title"></h2>
+          <button id="open-rules-stages-btn" class="nav-btn icon-only" type="button" aria-label="遊び方・ルール">
+            ❓
+          </button>
+        </header>
+
+        <div class="progress-card">
+          <div class="progress-meta">
+            <span id="stages-progress-text" class="progress-text"></span>
+            <button id="play-next-btn" class="primary-cta-btn" type="button">
+              ▶ つづきから遊ぶ
+            </button>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div id="stages-progress-fill" class="progress-fill"></div>
+          </div>
+        </div>
+
+        <div id="stage-grid" class="stage-grid" role="list"></div>
+      </section>
+
+      <!-- 3. Gameplay Screen -->
+      <section id="game-screen" class="screen game-screen" aria-label="ゲーム画面" hidden>
+        <header class="top-nav">
+          <button id="back-to-stages-btn" class="nav-btn" type="button">← 一覧</button>
+          <div class="game-heading">
+            <span id="game-difficulty-badge" class="difficulty-badge"></span>
+            <h2 id="game-stage-title" class="nav-title"></h2>
+          </div>
+          <div class="nav-actions">
+            <button id="open-rules-game-btn" class="nav-btn icon-only" type="button" aria-label="遊び方・ルール">
+              ❓
+            </button>
+            <button
+              id="sound-toggle-btn"
+              class="nav-btn icon-only"
+              type="button"
+              aria-pressed="true"
+              aria-label="音声オンオフ"
+            >
+              🔊
+            </button>
+          </div>
+        </header>
+
+        <div class="toolbar">
+          <button
+            id="mode-toggle-btn"
+            class="control-btn"
+            type="button"
+            aria-pressed="false"
+          >
+            ✏️ 塗りつぶし中
+          </button>
+          <button id="hint-btn" class="control-btn" type="button">
+            💡 ヒント
+          </button>
+          <button id="reset-btn" class="control-btn" type="button">
+            🔄 リセット
+          </button>
+        </div>
+
+        <div id="clear-banner" class="clear-banner" role="status" aria-live="polite" hidden>
+          <p id="clear-banner-text" class="clear-banner-title"></p>
+          <p id="clear-unlock-text" class="clear-unlock-note" hidden></p>
+          <div class="clear-actions">
+            <button id="next-stage-btn" class="clear-next-btn" type="button">
+              次の問題へ →
+            </button>
+            <button id="clear-to-list-btn" class="clear-list-btn" type="button">
+              ステージ一覧へ
+            </button>
+          </div>
+        </div>
+
+        <section class="game-card" aria-label="ゲーム盤面">
+          <div
+            id="game-board"
+            class="game-board"
+            role="grid"
+            aria-label="ナンバーサム・ピクロス盤面"
+          ></div>
+        </section>
+
+        <p id="status-hint" class="status-hint"></p>
+      </section>
     </main>
+
+    <!-- Rules & How to Play Modal -->
+    <dialog id="rules-dialog" class="rules-dialog" aria-labelledby="rules-dialog-title">
+      <div class="rules-content">
+        <header class="rules-header">
+          <h2 id="rules-dialog-title" class="rules-title">❓ 遊び方・ルール</h2>
+          <button id="close-rules-btn" class="nav-btn icon-only" type="button" aria-label="閉じる">
+            ✕
+          </button>
+        </header>
+
+        <div class="rules-body">
+          <section class="rule-section">
+            <h3>🎯 ルールは かんたん！たしざんパズル</h3>
+            <p class="rule-lead">
+              左（よこ）と 上（たて）の <strong>もくひょうの すうじ</strong> と おなじになるように、マスを ぬりつぶそう！
+            </p>
+
+            <!-- 小学生でもひと目でわかるビジュアル例 -->
+            <div class="visual-example" aria-label="あそびかたの例">
+              <div class="ve-caption">たとえば、もくひょうが <strong>「5」</strong> のとき…</div>
+              <div class="ve-row">
+                <div class="ve-header is-matched">
+                  <span class="ve-target">5</span>
+                  <span class="ve-current">(5)</span>
+                </div>
+                <div class="ve-cell is-filled">2</div>
+                <span class="ve-op" aria-hidden="true">+</span>
+                <div class="ve-cell is-x">4<span class="ve-x-mark">×</span></div>
+                <span class="ve-op" aria-hidden="true">+</span>
+                <div class="ve-cell is-filled">3</div>
+                <span class="ve-eq">= <strong>5!</strong></span>
+              </div>
+              <div class="ve-note">👆 ぬったマス（<strong>2 と 3</strong>）だけ たされるよ！</div>
+            </div>
+          </section>
+
+          <section class="rule-section">
+            <h3>🚦 色のサイン（ヒント）</h3>
+            <div class="color-guide-grid">
+              <div class="color-guide-item is-matched">
+                <span class="cg-badge">5 (5)</span>
+                <span><strong>ピッタリ！</strong>（ごうけいが おなじ）</span>
+              </div>
+              <div class="color-guide-item is-exceeded">
+                <span class="cg-badge">5 (7)</span>
+                <span><strong>おおすぎ！</strong>（ぬりすぎてるよ）</span>
+              </div>
+            </div>
+            <p class="rule-sub-note">✨ たて・よこ <strong>ぜんぶ緑</strong> になると、ドット絵が かんせいして つぎの もんだいが あそべるよ！</p>
+          </section>
+
+          <section class="rule-section">
+            <h3>🕹️ そうさほうほう</h3>
+            <div class="controls-guide-grid">
+              <div class="ctrl-guide-card">
+                <span class="ctrl-icon">✏️</span>
+                <div>
+                  <strong>ぬる / けす</strong>
+                  <p>タップ・クリック（なぞると れんぞくで ぬれるよ）</p>
+                </div>
+              </div>
+              <div class="ctrl-guide-card">
+                <span class="ctrl-icon">✖️</span>
+                <div>
+                  <strong>×印メモ</strong>
+                  <p>右クリック、または「✖️メモ中」で つかわないマスに 目印！</p>
+                </div>
+              </div>
+              <div class="ctrl-guide-card">
+                <span class="ctrl-icon">💡</span>
+                <div>
+                  <strong>ヒント</strong>
+                  <p>まよったときは 1マス おしえてくれるよ！</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="rules-footer">
+            <button id="reset-progress-btn" class="danger-link-btn" type="button">
+              進捗データを初期化する
+            </button>
+            <button id="confirm-rules-btn" class="primary-cta-btn" type="button">
+              わかった！あそぶ
+            </button>
+          </div>
+        </div>
+      </div>
+    </dialog>
   </body>
 </html>
