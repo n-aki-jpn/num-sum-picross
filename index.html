@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ナンバーサム・ピクロス | NumSum Picross</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <h1 class="app-title">NUMSUM PICROSS</h1>
+        <p class="app-subtitle">縦横の合計値を合わせてドット絵を完成させよう</p>
+      </header>
+
+      <nav id="stage-tabs" class="stage-tabs" aria-label="ステージ選択"></nav>
+
+      <div class="toolbar">
+        <button
+          id="mode-toggle-btn"
+          class="control-btn"
+          type="button"
+          aria-pressed="false"
+        >
+          ✏️ 塗りつぶし中 (切替)
+        </button>
+        <button id="reset-btn" class="control-btn" type="button">
+          🔄 リセット
+        </button>
+        <button
+          id="sound-toggle-btn"
+          class="control-btn"
+          type="button"
+          aria-pressed="true"
+        >
+          🔊 音声ON
+        </button>
+      </div>
+
+      <div id="clear-banner" class="clear-banner" role="status" aria-live="polite" hidden>
+        <span id="clear-banner-text"></span>
+      </div>
+
+      <section class="game-card" aria-label="ゲーム盤面">
+        <div id="game-board" class="game-board" role="grid" aria-label="5×5 ナンバーサム・ピクロス盤面"></div>
+      </section>
+
+      <p id="status-hint" class="status-hint"></p>
+    </main>
+  </body>
+</html>
