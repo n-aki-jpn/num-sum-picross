@@ -677,6 +677,7 @@ function initGame() {
     if (state.isCleared) return null;
 
     if (actionType === 'fill') {
+      if (state.xMarkGrid[r][c]) return null;
       const next = forceValue !== null ? forceValue : !state.selectedGrid[r][c];
       if (state.selectedGrid[r][c] === next) return null;
       state.selectedGrid[r][c] = next;
