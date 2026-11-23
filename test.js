@@ -11,6 +11,7 @@ const {
   createInitialProgress,
   applyStageClear,
   findHintCell,
+  verifyHumanSolvable,
 } = require('./app.js');
 
 function sumArray(arr) {
@@ -94,6 +95,18 @@ for (const diff of DIFFICULTIES) {
       true,
       `${stage.id}: answerMap selection must clear stage`
     );
+
+    const humanCheck = verifyHumanSolvable(stage.gridNumbers, stage.answerMap);
+    assert.equal(
+      humanCheck.solved,
+      true,
+      `${stage.id} (${stage.name}): must be 100% human-solvable`
+    );
+    assert.deepEqual(
+      humanCheck.resultGrid,
+      stage.answerMap,
+      `${stage.id} (${stage.name}): human solution must match answerMap uniquely`
+    );
   }
 }
 
@@ -140,4 +153,4 @@ assert.deepEqual(findHintCell(heartStage.answerMap, partialGrid), {
 const fullGrid = heartStage.answerMap.map((row) => row.map((v) => v === 1));
 assert.equal(findHintCell(heartStage.answerMap, fullGrid), null);
 
-console.log(`ALL TESTS PASSED (${STAGES.length} stages verified across ${DIFFICULTIES.length} difficulties)`);
+console.log(`ALL TESTS PASSED (${STAGES.length} stages verified across ${DIFFICULTIES.length} difficulties, 100% human-solvable)`);

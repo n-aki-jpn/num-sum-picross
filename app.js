@@ -121,6 +121,138 @@ function applyStageClear(progress, difficultyId, stageIndex, stageId, totalStage
 }
 
 /**
+ * Solve a single row or column using human-friendly deduction rules only:
+ * 1. remTarget === 0 -> all remaining unknowns are 0 (×)
+ * 2. cell > remTarget -> that cell is 0 (×)
+ * 3. k <= 5 and remTarget === remFullSum -> all remaining unknowns are 1
+ * 4. k <= 4 -> intersection of subsets of <= 4 remaining cells summing to remTarget
+ */
+function ultraHumanSolveLine(numbers, known, target, lineLabel = '') {
+  const n = numbers.length;
+  const unknownIdx = [];
+  let fixedSum = 0;
+  for (let i = 0; i < n; i++) {
+    if (known[i] === 1) fixedSum += numbers[i];
+    else if (known[i] === -1) unknownIdx.push(i);
+  }
+  const remTarget = target - fixedSum;
+  if (remTarget < 0) return { valid: false, forced: [] };
+  const k = unknownIdx.length;
+  if (k === 0) return { valid: remTarget === 0, forced: [] };
+
+  const remFullSum = unknownIdx.reduce((a, idx) => a + numbers[idx], 0);
+  if (remTarget > remFullSum) return { valid: false, forced: [] };
+
+  const forced = [];
+  for (const idx of unknownIdx) {
+    if (remTarget === 0) {
+      forced.push({
+        idx,
+        value: 0,
+        reason: `${lineLabel}の合計が目標(${target})に一致済みのため、残りは×`,
+      });
+    } else if (numbers[idx] > remTarget) {
+      forced.push({
+        idx,
+        value: 0,
+        reason: `${lineLabel}の残り目標(${remTarget})より数字(${numbers[idx]})が大きいため×`,
+      });
+    }
+  }
+  if (forced.length > 0) return { valid: true, forced };
+
+  if (k <= 5 && remTarget === remFullSum) {
+    for (const idx of unknownIdx) {
+      forced.push({
+        idx,
+        value: 1,
+        reason: `${lineLabel}の残り${k}マスをすべて足すと残り目標(${remTarget})になるため塗る`,
+      });
+    }
+    return { valid: true, forced };
+  }
+
+  if (k <= 4) {
+    let allOnes = (1 << k) - 1;
+    let allZeros = (1 << k) - 1;
+    let anyValid = false;
+    const limit = 1 << k;
+    for (let mask = 0; mask < limit; mask++) {
+      let s = 0;
+      for (let j = 0; j < k; j++) {
+        if (mask & (1 << j)) s += numbers[unknownIdx[j]];
+      }
+      if (s === remTarget) {
+        anyValid = true;
+        allOnes &= mask;
+        allZeros &= (~mask) & (limit - 1);
+      }
+    }
+    if (!anyValid) return { valid: false, forced: [] };
+    for (let j = 0; j < k; j++) {
+      if (allOnes & (1 << j)) {
+        forced.push({
+          idx: unknownIdx[j],
+          value: 1,
+          reason: `${lineLabel}の残り${k}マスから合計${remTarget}を作る組合せで塗るマスが確定`,
+        });
+      } else if (allZeros & (1 << j)) {
+        forced.push({
+          idx: unknownIdx[j],
+          value: 0,
+          reason: `${lineLabel}の残り${k}マスから合計${remTarget}を作る組合せで×が確定`,
+        });
+      }
+    }
+  }
+  return { valid: true, forced };
+}
+
+/**
+ * Verify that a stage is 100% solvable by human-scale line deduction and return the deduction trace.
+ */
+function verifyHumanSolvable(gridNumbers, answerMap) {
+  const N = gridNumbers.length;
+  const { targetRows, targetCols } = appData.deriveTargets(gridNumbers, answerMap);
+  const resultGrid = Array.from({ length: N }, () => Array(N).fill(-1));
+  const trace = [];
+  let changed = true;
+  let steps = 0;
+
+  while (changed) {
+    changed = false;
+    steps++;
+    for (let r = 0; r < N; r++) {
+      const res = ultraHumanSolveLine(gridNumbers[r], resultGrid[r], targetRows[r], `${r + 1}行目`);
+      if (!res.valid) return { solved: false, steps, resultGrid, trace };
+      for (const item of res.forced) {
+        if (resultGrid[r][item.idx] === -1) {
+          resultGrid[r][item.idx] = item.value;
+          trace.push({ r, c: item.idx, value: item.value, reason: item.reason });
+          changed = true;
+        }
+      }
+    }
+    for (let c = 0; c < N; c++) {
+      const colNums = gridNumbers.map((row) => row[c]);
+      const colState = resultGrid.map((row) => row[c]);
+      const res = ultraHumanSolveLine(colNums, colState, targetCols[c], `${c + 1}列目`);
+      if (!res.valid) return { solved: false, steps, resultGrid, trace };
+      for (const item of res.forced) {
+        if (resultGrid[item.idx][c] === -1) {
+          resultGrid[item.idx][c] = item.value;
+          trace.push({ r: item.idx, c, value: item.value, reason: item.reason });
+          changed = true;
+        }
+      }
+    }
+  }
+
+  const solved = resultGrid.every((row) => row.every((v) => v !== -1));
+  return { solved, steps, resultGrid, trace };
+}
+
+/**
  * Pure helper: find one cell to fix or reveal for the Hint button.
  * Prioritizes fixing an erroneously selected cell, then revealing an unselected answer cell.
  */
@@ -861,20 +993,53 @@ function initGame() {
   hintBtn?.addEventListener('click', () => {
     if (state.isCleared) return;
     const stage = getStage();
-    const hint = findHintCell(stage.answerMap, state.selectedGrid);
-    if (!hint) return;
+    const basicHint = findHintCell(stage.answerMap, state.selectedGrid);
+    let targetR = null;
+    let targetC = null;
+    let hintMessage = '';
 
-    const { r, c, action } = hint;
-    if (action === 'select') {
-      state.selectedGrid[r][c] = true;
-      state.xMarkGrid[r][c] = false;
+    if (basicHint && basicHint.action === 'unselect') {
+      targetR = basicHint.r;
+      targetC = basicHint.c;
+      state.selectedGrid[targetR][targetC] = false;
+      hintMessage = `💡 ヒント (${targetR + 1}行${targetC + 1}列): 塗らないマスなので選択を解除しました！`;
     } else {
-      state.selectedGrid[r][c] = false;
+      const solvedTrace = verifyHumanSolvable(stage.gridNumbers, stage.answerMap).trace;
+      const nextStep = solvedTrace.find(
+        (step) =>
+          (step.value === 1 && !state.selectedGrid[step.r][step.c]) ||
+          (step.value === 0 && !state.xMarkGrid[step.r][step.c])
+      );
+
+      if (nextStep) {
+        targetR = nextStep.r;
+        targetC = nextStep.c;
+        if (nextStep.value === 1) {
+          state.selectedGrid[targetR][targetC] = true;
+          state.xMarkGrid[targetR][targetC] = false;
+        } else {
+          state.xMarkGrid[targetR][targetC] = true;
+          state.selectedGrid[targetR][targetC] = false;
+        }
+        hintMessage = `💡 ヒント (${targetR + 1}行${targetC + 1}列): ${nextStep.reason}`;
+      } else if (basicHint) {
+        targetR = basicHint.r;
+        targetC = basicHint.c;
+        state.selectedGrid[targetR][targetC] = true;
+        state.xMarkGrid[targetR][targetC] = false;
+        hintMessage = `💡 ヒント (${targetR + 1}行${targetC + 1}列): 正解のマスを1つ塗りました！`;
+      }
     }
+
+    if (targetR === null || targetC === null) return;
+
     sfx.hint();
     updateBoardUI();
+    if (!state.isCleared && statusHintEl && hintMessage) {
+      statusHintEl.textContent = hintMessage;
+    }
 
-    const cell = cellEls[r]?.[c];
+    const cell = cellEls[targetR]?.[targetC];
     if (cell) {
       cell.classList.remove('is-hint-flash');
       void cell.offsetWidth;
@@ -939,5 +1104,7 @@ if (typeof module !== 'undefined' && module.exports) {
     createInitialProgress,
     applyStageClear,
     findHintCell,
+    ultraHumanSolveLine,
+    verifyHumanSolvable,
   };
 }

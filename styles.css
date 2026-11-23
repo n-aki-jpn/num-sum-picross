@@ -562,16 +562,35 @@ button:disabled {
 .cell-x {
   display: none;
   position: absolute;
-  inset: 0;
-  place-items: center;
-  font-size: clamp(0.82rem, 4cqi, 1.45rem);
-  font-weight: 800;
-  color: var(--text-muted);
+  inset: 10%;
+  font-size: 0;
+  color: transparent;
   pointer-events: none;
 }
 
+.cell-x::before,
+.cell-x::after {
+  content: '';
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: -10%;
+  inline-size: 120%;
+  block-size: clamp(2.5px, 0.75cqi, 4.5px);
+  background-color: var(--text-muted);
+  border-radius: 999px;
+  translate: 0 -50%;
+}
+
+.cell-x::before {
+  rotate: 45deg;
+}
+
+.cell-x::after {
+  rotate: -45deg;
+}
+
 .grid-cell.is-marked .cell-x {
-  display: grid;
+  display: block;
 }
 
 .grid-cell.is-cleared-art {
@@ -726,11 +745,31 @@ button:disabled {
 
 .ve-x-mark {
   position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: 1.25rem;
-  color: var(--text-muted);
+  inset: 10%;
+  font-size: 0;
+  color: transparent;
+  pointer-events: none;
+}
+
+.ve-x-mark::before,
+.ve-x-mark::after {
+  content: '';
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: -10%;
+  inline-size: 120%;
+  block-size: 3px;
+  background-color: var(--text-muted);
+  border-radius: 999px;
+  translate: 0 -50%;
+}
+
+.ve-x-mark::before {
+  rotate: 45deg;
+}
+
+.ve-x-mark::after {
+  rotate: -45deg;
 }
 
 .ve-op,
